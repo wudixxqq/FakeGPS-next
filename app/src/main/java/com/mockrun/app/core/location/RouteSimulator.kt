@@ -1,4 +1,4 @@
-﻿package com.mockrun.app.core.location
+package com.mockrun.app.core.location
 
 import com.mockrun.app.domain.model.Route
 import com.mockrun.app.domain.model.SimulatedPoint
@@ -46,6 +46,7 @@ class RouteSimulator @Inject constructor(
         var covered = totalDistance * startProgress.toDouble()
         val initialAlt = route.waypoints.firstOrNull()?.altitude ?: 24.0
         kinematicsEngine.resetElevation(initialAlt)
+        kinematicsEngine.resetSpeedDynamics()
 
         while (covered < totalDistance) {
             val pt = interpolateAt(segments, covered)
@@ -63,9 +64,8 @@ class RouteSimulator @Inject constructor(
             )
             val safeSpeedMs = kinematicsEngine.computeCurvatureConstrainedSpeed(baseSpeedMs, radius)
 
-            // ±3% subtle micro-jitter in speed for physical biomechanical realism
-            val variation = 1.0 + kotlin.random.Random.nextDouble(-0.03, 0.03)
-            val currentSpeedMs = safeSpeedMs * variation
+            // Dynamic realistic speed combining macro pacing wave (±12%) and micro stride jitter (±3%)
+            val currentSpeedMs = kinematicsEngine.nextDynamicSpeed(safeSpeedMs)
             val distThisTick = currentSpeedMs * (UPDATE_INTERVAL_MS / 1000.0)
 
             val dynAlt = kinematicsEngine.nextElevation(baseAltitude = pt.alt, deltaDistanceMeters = distThisTick)

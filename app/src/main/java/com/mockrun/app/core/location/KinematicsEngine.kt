@@ -1,4 +1,4 @@
-﻿package com.mockrun.app.core.location
+package com.mockrun.app.core.location
 
 import com.mockrun.app.domain.model.WayPoint
 import javax.inject.Inject
@@ -97,6 +97,48 @@ class KinematicsEngine @Inject constructor() {
         // Bounded within natural local terrain (+-20m around base)
         currentAltitude = currentAltitude.coerceIn(baseAltitude - 18.0, baseAltitude + 22.0)
         return (currentAltitude * 10.0).roundToInt() / 10.0
+    }
+
+    // Speed fluctuation state: Ornstein-Uhlenbeck pacing wave + high-frequency stride micro-jitter
+    private var speedPacingFactor: Double = 1.0  // Mean 1.0, fluctuates between 0.88 and 1.12
+
+    /**
+     * Resets the pacing dynamics state when starting a new simulation.
+     */
+    fun resetSpeedDynamics() {
+        speedPacingFactor = 1.0
+    }
+
+    /**
+     * Generates a realistic, continuous dynamic speed (m/s) based on base safe speed.
+     * Combines:
+     * 1. Macro Pacing Wave (低频体能/路况节奏波浪): Ornstein-Uhlenbeck mean-reverting process with ±10%~±12% swing
+     * 2. Micro Stride/Vibration Jitter (高频步伐/微扰): ±3% instant perturbation
+     */
+    fun nextDynamicSpeed(baseSpeedMs: Double): Double {
+        if (baseSpeedMs <= 0.1) return 0.0
+
+        // Ornstein-Uhlenbeck drift toward 1.0 (equilibrium)
+        val theta = 0.15   // Reversion rate
+        val sigma = 0.08   // Volatility
+        val dt = 1.0       // 1 second tick
+
+        val drift = theta * (1.0 - speedPacingFactor) * dt
+        val u1 = random.nextDouble().coerceAtLeast(1e-7)
+        val u2 = random.nextDouble()
+        val z = sqrt(-2.0 * ln(u1)) * cos(2.0 * PI * u2)
+        val shock = sigma * sqrt(dt) * z
+
+        speedPacingFactor += drift + shock
+        // Bounded within [0.88, 1.12] - ±12% natural pacing wave
+        speedPacingFactor = speedPacingFactor.coerceIn(0.88, 1.12)
+
+        // Micro stride jitter (±3%)
+        val microJitter = 1.0 + (random.nextDouble() - 0.5) * 0.06
+
+        val dynamicSpeed = baseSpeedMs * speedPacingFactor * microJitter
+        // Ensure minimum motion speed
+        return dynamicSpeed.coerceAtLeast(0.3)
     }
 
     /**

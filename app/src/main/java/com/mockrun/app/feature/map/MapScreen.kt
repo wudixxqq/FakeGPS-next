@@ -1,4 +1,4 @@
-﻿package com.mockrun.app.feature.map
+package com.mockrun.app.feature.map
 
 import com.mockrun.app.feature.map.IosVerticalZoomControl
 import com.mockrun.app.feature.map.SearchLocationDialog
@@ -152,6 +152,7 @@ fun MapScreen(
     val realPhysicalLocation by simulationViewModel.realPhysicalLocation.collectAsState()
     val multiTargetRules by simulationViewModel.multiTargetRules.collectAsState()
     val activeTargetKey by simulationViewModel.activeTargetKey.collectAsState()
+    val isRootAvailable by simulationViewModel.isRootAvailable.collectAsState()
     var showMapAppPickerSheet by remember { mutableStateOf(false) }
 
     var showSaveDialog by remember { mutableStateOf(false) }
@@ -1133,6 +1134,7 @@ fun MapScreen(
         RouteConfigDialog(
             currentSpeed = selectedSpeed,
             isCadenceEnabled = isCadenceEnabled,
+            isRootAvailable = isRootAvailable,
             onSpeedChange = { speed ->
                 selectedSpeed = speed
                 if (simState.status is com.mockrun.app.domain.model.SimulationStatus.Running) {

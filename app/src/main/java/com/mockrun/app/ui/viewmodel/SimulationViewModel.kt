@@ -22,6 +22,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import com.mockrun.app.core.data.repository.MultiTargetRepository
 import com.mockrun.app.domain.model.MultiTargetRule
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -82,8 +83,23 @@ class SimulationViewModel @Inject constructor(
 
     suspend fun getInstalledUserApps() = multiTargetRepo.getInstalledUserApps()
 
+    private val _isRootAvailable = MutableStateFlow(false)
+    val isRootAvailable: StateFlow<Boolean> = _isRootAvailable.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            _isRootAvailable.value = rootBridge.isRootAvailable()
+        }
+    }
+
+    fun isRootConfirmed(): Boolean = rootBridge.isRootConfirmed()
+
     fun setCadenceEnabled(enabled: Boolean, currentSpeedKmh: Float = 8f) {
-        sensorEngine.setCadenceEnabled(enabled, currentSpeedKmh)
+        viewModelScope.launch {
+            val rootOk = rootBridge.isRootAvailable()
+            _isRootAvailable.value = rootOk
+            sensorEngine.setCadenceEnabled(enabled && rootOk, currentSpeedKmh)
+        }
     }
 
     fun setCadenceMode(mode: CadenceMode, customValue: Int = 165, currentSpeedKmh: Float = 8f) {

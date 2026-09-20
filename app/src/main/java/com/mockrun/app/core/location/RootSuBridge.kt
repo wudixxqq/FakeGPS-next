@@ -1,4 +1,4 @@
-﻿package com.mockrun.app.core.location
+package com.mockrun.app.core.location
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -18,6 +18,8 @@ class RootSuBridge @Inject constructor() {
     }
 
     private var isRootedCache: Boolean? = null
+
+    fun isRootConfirmed(): Boolean = isRootedCache == true
 
     suspend fun isRootAvailable(): Boolean = withContext(Dispatchers.IO) {
         // 只缓存"确认有 root"的结论；未确认时每次重探（用户可能稍后才在 Root 管理器里授权）。

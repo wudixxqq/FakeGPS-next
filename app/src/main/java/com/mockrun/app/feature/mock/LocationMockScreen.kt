@@ -1,4 +1,4 @@
-﻿package com.mockrun.app.feature.mock
+package com.mockrun.app.feature.mock
 
 
 import android.content.ClipData
@@ -152,9 +152,9 @@ fun LocationMockScreen(
 
     LaunchedEffect(Unit) {
         isRootAvailable = rootBridge.isRootAvailable()
+        isRootMode = InjectionModePrefs.validateOrDowngrade(context, isRootAvailable) == InjectionMode.ROOT
         isDevMockLocationEnabled = XposedStatusHelper.isMockLocationAppSelected(context)
         isLsposedHookActive = XposedStatusHelper.isLsposedHookReallyActive(context)
-        isRootMode = InjectionModePrefs.isRootMode(context)
         if (isRootAvailable && isRootMode) {
             rootBridge.grantMockLocation(context.packageName)
         }
@@ -634,17 +634,29 @@ fun LocationMockScreen(
                     IosSwitch(
                         checked = isRootMode,
                         onCheckedChange = { enabled ->
-                            isRootMode = enabled
-                            InjectionModePrefs.setMode(
-                                context,
-                                if (enabled) InjectionMode.ROOT else InjectionMode.NO_ROOT
-                            )
-                            if (enabled && isRootAvailable) {
-                                // 切到 Root：立即自动授予模拟权限（含全局开发者选项开关），无需手动打开开发者选项
-                                coroutineScope.launch { rootBridge.grantMockLocation(context.packageName) }
-                            } else if (!enabled && isRootAvailable) {
-                                // 切到免 Root：把硬件恢复为正常高精度，避免定位卡在异常状态
-                                coroutineScope.launch { rootBridge.restoreScanningHardware() }
+                            if (enabled) {
+                                coroutineScope.launch {
+                                    val hasRoot = rootBridge.isRootAvailable()
+                                    if (!hasRoot) {
+                                        isRootAvailable = false
+                                        isRootMode = false
+                                        InjectionModePrefs.setMode(context, InjectionMode.NO_ROOT)
+                                        Toast.makeText(context, "未检测到 Root 权限，无法开启 Root 注入模式", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        isRootAvailable = true
+                                        isRootMode = true
+                                        InjectionModePrefs.setMode(context, InjectionMode.ROOT)
+                                        rootBridge.grantMockLocation(context.packageName)
+                                        Toast.makeText(context, "已开启 Root 注入模式并自动配置权限", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            } else {
+                                isRootMode = false
+                                InjectionModePrefs.setMode(context, InjectionMode.NO_ROOT)
+                                if (isRootAvailable) {
+                                    coroutineScope.launch { rootBridge.restoreScanningHardware() }
+                                }
+                                Toast.makeText(context, "已切换为免 Root 注入模式", Toast.LENGTH_SHORT).show()
                             }
                         }
                     )

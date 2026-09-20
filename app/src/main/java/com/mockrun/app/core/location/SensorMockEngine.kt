@@ -1,4 +1,4 @@
-﻿package com.mockrun.app.core.location
+package com.mockrun.app.core.location
 
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,7 +17,7 @@ enum class CadenceMode(val label: String) {
 }
 
 data class SensorMockData(
-    val isEnabled: Boolean = true,
+    val isEnabled: Boolean = false,
     val stepCount: Long = 0L,
     val cadenceStepsPerMin: Int = 160,
     val strideLengthMeters: Float = 0.83f,
@@ -76,12 +76,15 @@ class SensorMockEngine @Inject constructor(
     }
 
     fun setCadenceEnabled(enabled: Boolean, currentSpeedKmh: Float = 8f) {
-        val cadence = if (enabled) calculateCadence(currentSpeedKmh) else 0
+        val rootOk = rootBridge.isRootConfirmed()
+        val actuallyEnabled = enabled && rootOk
+        val cadence = if (actuallyEnabled) calculateCadence(currentSpeedKmh) else 0
         val stride = calculateStride(currentSpeedKmh, cadence)
         _sensorState.value = _sensorState.value.copy(
-            isEnabled = enabled,
+            isEnabled = actuallyEnabled,
             cadenceStepsPerMin = cadence,
-            strideLengthMeters = stride
+            strideLengthMeters = stride,
+            isRootActive = rootOk
         )
     }
 

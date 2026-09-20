@@ -1,4 +1,4 @@
-﻿package com.mockrun.app.feature.map.tabs
+package com.mockrun.app.feature.map.tabs
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -31,13 +31,14 @@ data class SpeedPreset(val label: String, val speed: Float, val icon: ImageVecto
 fun RouteConfigDialog(
     currentSpeed: Float,
     isCadenceEnabled: Boolean,
+    isRootAvailable: Boolean = false,
     onSpeedChange: (Float) -> Unit,
     onCadenceToggle: (Boolean) -> Unit,
     onDismiss: () -> Unit,
     isLiquidGlass: Boolean = true
 ) {
     var speedVal by remember { mutableFloatStateOf(currentSpeed) }
-    var cadenceVal by remember { mutableStateOf(isCadenceEnabled) }
+    var cadenceVal by remember { mutableStateOf(if (isRootAvailable) isCadenceEnabled else false) }
 
     val presets = listOf(
         SpeedPreset("步行", 4.5f, Icons.Default.DirectionsWalk),
@@ -146,15 +147,27 @@ fun RouteConfigDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text("拟真步频与传感器模拟", fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold, color = IosColors.Label)
-                        Text("自动生成步数、加速度与传感器震荡", fontSize = 11.sp, color = IosColors.SecondaryLabel)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (isRootAvailable) "拟真步频与传感器模拟" else "拟真步频与传感器模拟 (Root 专享)",
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (isRootAvailable) IosColors.Label else IosColors.SecondaryLabel
+                        )
+                        Text(
+                            text = if (isRootAvailable) "自动生成步数、加速度与传感器震荡" else "需 Root 注入环境支持（当前设备未获得 Root）",
+                            fontSize = 11.sp,
+                            color = if (isRootAvailable) IosColors.SecondaryLabel else IosColors.SystemOrange
+                        )
                     }
                     Switch(
-                        checked = cadenceVal,
+                        checked = if (isRootAvailable) cadenceVal else false,
+                        enabled = isRootAvailable,
                         onCheckedChange = {
-                            cadenceVal = it
-                            onCadenceToggle(it)
+                            if (isRootAvailable) {
+                                cadenceVal = it
+                                onCadenceToggle(it)
+                            }
                         },
                         colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = IosColors.SystemGreen)
                     )

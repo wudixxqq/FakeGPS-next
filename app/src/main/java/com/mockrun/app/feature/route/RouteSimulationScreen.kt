@@ -1,4 +1,4 @@
-﻿package com.mockrun.app.feature.route
+package com.mockrun.app.feature.route
 
 import android.content.Context
 import android.content.Intent
@@ -84,7 +84,12 @@ fun RouteSimulationScreen(
     }
 
     LaunchedEffect(Unit) {
-        isRootActive = InjectionModePrefs.isRootMode(context) && rootBridge.isRootAvailable()
+        val rootOk = rootBridge.isRootAvailable()
+        val isRoot = InjectionModePrefs.isRootMode(context, rootOk) && rootOk
+        isRootActive = isRoot
+        if (!isRoot && sensorState.isEnabled) {
+            simulationViewModel.setCadenceEnabled(false, selectedSpeed)
+        }
     }
 
     fun applySpeed(speed: Float) {

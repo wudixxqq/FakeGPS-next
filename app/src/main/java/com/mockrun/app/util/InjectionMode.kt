@@ -20,17 +20,34 @@ enum class InjectionMode { ROOT, NO_ROOT }
 object InjectionModePrefs {
     private const val PREFS_NAME = "fake_gps_injection_mode_prefs"
     private const val KEY_MODE = "injection_mode"
-    private const val DEFAULT = "ROOT"
 
-    fun getMode(context: Context): InjectionMode {
+    fun getMode(context: Context, isRootAvailable: Boolean? = null): InjectionMode {
+        if (isRootAvailable == false) {
+            return InjectionMode.NO_ROOT
+        }
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        return when (prefs.getString(KEY_MODE, DEFAULT)) {
+        // If not set yet and isRootAvailable is explicitly false, default to NO_ROOT
+        if (!prefs.contains(KEY_MODE) && isRootAvailable == false) {
+            return InjectionMode.NO_ROOT
+        }
+        return when (prefs.getString(KEY_MODE, "ROOT")) {
             "NO_ROOT" -> InjectionMode.NO_ROOT
-            else -> InjectionMode.ROOT
+            else -> if (isRootAvailable == false) InjectionMode.NO_ROOT else InjectionMode.ROOT
         }
     }
 
-    fun isRootMode(context: Context): Boolean = getMode(context) == InjectionMode.ROOT
+    fun isRootMode(context: Context, isRootAvailable: Boolean? = null): Boolean {
+        if (isRootAvailable == false) return false
+        return getMode(context, isRootAvailable) == InjectionMode.ROOT
+    }
+
+    fun validateOrDowngrade(context: Context, isRootAvailable: Boolean): InjectionMode {
+        if (!isRootAvailable) {
+            setMode(context, InjectionMode.NO_ROOT)
+            return InjectionMode.NO_ROOT
+        }
+        return getMode(context, isRootAvailable)
+    }
 
     fun setMode(context: Context, mode: InjectionMode) {
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
