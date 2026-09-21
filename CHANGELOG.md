@@ -8,6 +8,25 @@
 
 ---
 
+## [1.6.0] - 2026-09-21
+
+> P0 架构重构与性能深度优化：彻底消除 UI 线程阻塞与 1Hz 高频序列化风暴，建立会话管理与生命周期解耦机制。
+
+### 优化与重构 (Refactored & Optimized)
+
+- **消除 UI 线程阻塞。** `SimulationViewModel` 中彻底移除 `runBlocking(Dispatchers.IO)`，改用全异步 `viewModelScope.launch` 与 `withContext(Dispatchers.IO)` 校验并授权权限；引入 Job 追踪取消旧请求，杜绝快速点击时 UI 掉帧卡死及 ANR 风险。
+- **消除每秒序列化风暴。** 重构 `MockLocationService` 模拟状态持久化机制。全量 `Route` 仅在启动模拟时序列化一次，在 1Hz 模拟主循环 tick 中仅写入轻量进度与速度（`saveSimulationProgress`），彻底消除 `ObjectOutputStream` + Base64 + `SharedPreferences` 在主循环中的持续 GC 与 I/O 抖动。
+- **引入会话管理机制。** 在 `MockLocationService` 中引入 `currentSessionId`，在启动模拟、单点模拟、变速、进度跳转、停止时自增更新。模拟轮询与单点轮询严格校验会话 ID，避免快速点击或网络延迟导致旧协程残余点继续注入与坐标竞态跳变。
+- **Provider 生命周期与变速/Seek 解耦。** `mockEngine.register()` 改为仅在未注册时调用，变速与进度拖动不再反注册/重新注册系统测试提供商，避免频繁触发系统位置提供商广播与位置闪烁。
+- **区分用户主动停止与系统异常回收。** 引入 `userStopped` 状态标记，仅在用户主动点击停止或最近任务划掉时清除持久化状态；系统因 LMK 杀掉服务时完整保留恢复点，支持 `START_STICKY` 完美无感自愈续跑。
+
+## [1.5.1] - 2026-09-20
+
+### 优化 (Improved)
+
+- **真实拟真速度动态波动。** 路线模拟引入运动学动态速度微波动算法，根据巡航基准速度自动平滑浮动，模拟真实步行、骑行与车速行为。
+- **Root 模式与权限边界严谨隔离。** 严密隔离 Root 注入模式开关与步频模拟开关，无 Root 权限时严格限制开启并给出明确指引。
+
 ## [1.5.0] - 2026-09-19
 
 > 修复 Root 模式下「点开启仍弹需设置模拟位置应用」的真凶（v1.4.9 仍未解决）：授权命令写入的是外部进程的 app-op，而 App 进程内读取带缓存。

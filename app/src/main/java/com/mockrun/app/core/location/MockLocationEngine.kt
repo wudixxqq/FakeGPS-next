@@ -1,4 +1,4 @@
-﻿package com.mockrun.app.core.location
+package com.mockrun.app.core.location
 
 import android.content.Context
 import android.location.Location
@@ -52,6 +52,8 @@ class MockLocationEngine(private val context: Context) {
     private val activeProviders = Collections.synchronizedSet(mutableSetOf<String>())
 
     private var isRegistered = false
+
+    fun isRegistered(): Boolean = isRegistered
 
     @Synchronized
     fun register(): Boolean {

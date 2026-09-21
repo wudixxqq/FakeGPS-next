@@ -2,30 +2,40 @@
 
 > **版本真源**：`app/build.gradle.kts` 的 `versionCode` / `versionName`。`version.json`、`package.json`、README 与 CHANGELOG 均以其为准同步。
 
-## 当前状态 (Current State)，更新于 2026-09-18
+## 当前状态 (Current State)，更新于 2026-09-21
 
 | 项目 | 值 |
 | :--- | :--- |
-| **最新已发布版本** | `v1.5.0`（修复 app-op 读取缓存导致 Root 模式误弹「需设置模拟位置应用」） |
-| **Android 内部版本** | `versionCode = 27` |
-| **Android 显示版本** | `versionName = "v1.5.0"` |
-| **本版产物提交** | 待 CI 构建回填 |
-| **相对 v1.4.7 差异** | `resolveInjectionPermission` 在 Root 模式下以 root 授权命令退出码为准放行（规避 AppOpsManager 读缓存误判）；`grantMockLocation` 分离 `settings put` 与 `appops set` 并支持三种 appops 写法；`isRootAvailable()` 改为始终 `su -c id` 判定；两处 UI 预检统一走 `resolveInjectionPermission` |
-| **上一条已发布版本** | `v1.4.7`（tag `v1.4.7` → `6f1e0cd`，versionCode = 24）。**v1.4.8 / v1.4.9 已于 2026-09-19 删除（Release 与 tag 一并移除）**，因均未解决 Root 模式弹窗问题 |
+| **最新已发布版本** | `v1.6.0`（P0 架构重构：UI 线程无阻塞、1Hz 状态极轻量持久化、会话隔离、Provider 生命周期解耦、区分用户停止与系统回收） |
+| **Android 内部版本** | `versionCode = 29` |
+| **Android 显示版本** | `versionName = "v1.6.0"` |
+| **本版产物提交** | 待构建回填 |
+| **相对 v1.5.1 差异** | `SimulationViewModel` 消除 `runBlocking`；`MockLocationService` 消除 1Hz 全量 `Route` 序列化风暴；新增 `currentSessionId` 与 `userStopped` 机制；Provider 注册与变速/Seek 完全解耦 |
+| **上一条已发布版本** | `v1.5.1`（versionCode = 28） |
 | **交付存放目录** | `D:\Desktop\fake gps\` |
-| **最新安装包路径** | `D:\Desktop\fake gps\FakeGPS-next-v1.5.0-release.apk` |
-| **仓库内 Release 产物** | `FakeGPS-next-v1.5.0-release.apk`（待回提，jsDelivr CDN 依赖此路径） |
+| **最新安装包路径** | `D:\Desktop\fake gps\FakeGPS-next-v1.6.0-release.apk` |
 | **发布方式** | GitHub Actions [`.github/workflows/release.yml`](.github/workflows/release.yml)（`workflow_dispatch` 或 push tag `v*`） |
 | **签名证书 SHA-256** | `0f8d4bea2db592a239dbc2eab8de441ff26dd6f1e244bfe4dbff099c1072761e`（`CN=FakeGPS-next`，CI 固定密钥，v1.4.2 起未变） |
 
-### v1.5.0 构建信息（待 CI 构建）
+### v1.6.0 构建信息
 
-- **构建环境**：GitHub Actions `ubuntu-latest`，JDK 17（temurin），Android SDK `platforms;android-34` + `build-tools;34.0.0`
-- **构建命令**：`sh ./gradlew :app:assembleRelease --no-daemon --stacktrace`
+- **构建时间**：2026-09-21（本地 release 构建已完成）
+- **构建环境**：本地 Windows Gradle + GitHub Actions `ubuntu-latest`，JDK 17
+- **构建命令**：`.\gradlew.bat assembleRelease --no-daemon`
 - **产物绝对路径**：`app/build/outputs/apk/release/app-release.apk`
-- **Release**：https://github.com/Elysia-SHY/FakeGPS-next/releases/tag/v1.5.0
-- **本次改动要点**：`SimulationViewModel.resolveInjectionPermission` 在 Root 模式下改为以 `grantMockLocation` 的返回值放行（不再立刻用 `checkPrimaryPermissions` 读可能过期的 AppOps 缓存）；`RootSuBridge.grantMockLocation` 去掉 `&&` 串联，`appops` 依次尝试三种写法、`settings put` 独立尽力而为；`LocationMockScreen` 文案由「Root 已自动授权」改为「Root 已代为设置 · 无需你手动打开开发者选项」。防卡死逻辑未改动。
-- **编译/构建验证**：CI `assembleRelease` 通过后回填 SHA-256 与 run id；**未做真机验证**
+- **APK 大小**：3,909,800 bytes
+- **APK SHA-256**：`03164a56c9018db118618c1fb41a4bce4e1f1c4f229d2a45c8a8dcc01a1e7ab8`
+- **交付安装包路径**：`D:\Desktop\fake gps\FakeGPS-next-v1.6.0-release.apk` 与 `FakeGPS-LATEST.apk`
+- **Release**：https://github.com/Elysia-SHY/FakeGPS-next/releases/tag/v1.6.0
+- **本次改动要点**：
+  1. `SimulationViewModel.startPointMock` 与 `startSimulation` 移除 `runBlocking(Dispatchers.IO)`，改用全异步协程与上下文调度，并添加 Job 追踪避免并发竞态。
+  2. `MockLocationService` 1Hz tick 主循环仅保存进度与动态速度（`saveSimulationProgress`），全量 `Route` 仅在启动时序列化一次，彻底消灭高频 GC 与 I/O 抖动。
+  3. 引入 `currentSessionId` 机制，快速切换/变速/Seek 时自动丢弃失效旧数据包。
+  4. 变速与 Seek 拖动不再重新调用 `mockEngine.register()`，完全避免系统测试提供商重新注册引发的广播与位置抖动。
+  5. 引入 `userStopped` 状态标记，当服务遭遇系统 LMK 回收时完整保留恢复点，支持 `START_STICKY` 完美自愈。
+- **编译/构建验证**：本地 `assembleRelease` BUILD SUCCESSFUL；**未做真机验证**
+
+### v1.5.0 构建信息（待 CI 构建）
 
 ### v1.4.9 构建信息
 

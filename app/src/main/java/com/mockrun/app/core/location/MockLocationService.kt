@@ -1,4 +1,4 @@
-﻿package com.mockrun.app.core.location
+package com.mockrun.app.core.location
 
 import android.app.*
 import android.content.Context
@@ -82,6 +82,8 @@ class MockLocationService : Service() {
     private var currentRoute: Route? = null
     private var currentSpeedKmh: Float = 8f
     private var currentProgress: Float = 0f
+    private var currentSessionId: Long = 0L
+    private var userStopped: Boolean = false
 
     override fun onCreate() {
         super.onCreate()
@@ -152,6 +154,7 @@ class MockLocationService : Service() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
+        userStopped = true
         // 用户从最近任务里划掉卡片是一个明确的结束意图。
         //
         // 此前这里会调度复活闹钟把服务拉回来继续模拟，而恢复出来的状态又会持续刷新 hook 的租约，
@@ -181,7 +184,7 @@ class MockLocationService : Service() {
             val lonBits = sp.getLong(KEY_SAVED_LON, java.lang.Double.doubleToRawLongBits(116.4074))
             val lat = java.lang.Double.longBitsToDouble(latBits)
             val lon = java.lang.Double.longBitsToDouble(lonBits)
-            android.util.Log.d("MockLocationService", "Resurrected: successfully restoring point mock $lat, $lon")
+            Diag.i(TAG, "Resurrected: successfully restoring point mock $lat, $lon")
             startPointMock(lat, lon)
             return
         }
@@ -193,7 +196,7 @@ class MockLocationService : Service() {
             if (savedRoute != null) {
                 val speed = sp.getFloat(KEY_SIM_SPEED, currentSpeedKmh)
                 val progress = sp.getFloat(KEY_SIM_PROGRESS, currentProgress)
-                android.util.Log.d("MockLocationService", "Resurrected: successfully restoring simulation at $progress")
+                Diag.i(TAG, "Resurrected: successfully restoring simulation at $progress")
                 startSimulation(savedRoute, speed, progress)
             }
         }
@@ -224,6 +227,14 @@ class MockLocationService : Service() {
         }
     }
 
+    private fun saveSimulationProgress(progress: Float, speed: Float) {
+        getSharedPreferences(PREFS_MOCK_SERVICE, Context.MODE_PRIVATE).edit().apply {
+            putFloat(KEY_SIM_PROGRESS, progress)
+            putFloat(KEY_SIM_SPEED, speed)
+            apply()
+        }
+    }
+
     private fun serializeRoute(route: Route): String = runCatching {
         val baos = java.io.ByteArrayOutputStream()
         java.io.ObjectOutputStream(baos).use { it.writeObject(route) }
@@ -243,8 +254,10 @@ class MockLocationService : Service() {
         simulationJob?.cancel()
         pointMockJob?.cancel()
         serviceJob.cancel()
-        savePointMockState(active = false)
-        saveSimulationState(active = false)
+        if (userStopped) {
+            savePointMockState(active = false)
+            saveSimulationState(active = false)
+        }
         if (!stateRepo.isJoystickActive.value) {
             mockEngine.unregister()
             MockLocationEngine.forceCleanAllTestProviders(this)
@@ -260,6 +273,9 @@ class MockLocationService : Service() {
     // ---- Simulation Control ----
 
     private fun startSimulation(route: Route, speedKmh: Float, startProgress: Float) {
+        userStopped = false
+        val sessionId = ++currentSessionId
+
         // Mutual exclusion: cancel point mock
         pointMockJob?.cancel()
         savePointMockState(active = false)
@@ -269,7 +285,7 @@ class MockLocationService : Service() {
         currentSpeedKmh = speedKmh
         currentProgress = startProgress
 
-        if (!mockEngine.register()) {
+        if (!mockEngine.isRegistered() && !mockEngine.register()) {
             stateRepo.onError("权限不足：请在手机【开发者选项】中将 Fake GPS 设为「模拟位置信息应用」")
             stopSelf()
             return
@@ -279,18 +295,24 @@ class MockLocationService : Service() {
         stateRepo.onSimulationStarted(route, speedKmh)
         com.mockrun.app.hook.HookStateBridge.setRouteSimulationMode(true)
 
+        launchSimulationLoop(sessionId, route, speedKmh, startProgress)
+    }
+
+    private fun launchSimulationLoop(sessionId: Long, route: Route, speedKmh: Float, startProgress: Float) {
         simulationJob?.cancel()
         simulationJob = serviceScope.launch {
             simulator.simulateRoute(route, speedKmh, startProgress).collectLatest { point ->
+                if (sessionId != currentSessionId || !isActive) return@collectLatest
                 injectLocation(point)
                 currentProgress = point.progressPercent
                 stateRepo.onLocationUpdate(point)
-                val currentSpeedKmh = point.speed * 3.6f
-                sensorEngine.updateTick(currentSpeedKmh, 1.0f)
-                saveSimulationState(active = true, route = route, speed = speedKmh, progress = currentProgress)
+                val dynamicSpeedKmh = point.speed * 3.6f
+                sensorEngine.updateTick(dynamicSpeedKmh, 1.0f)
+                saveSimulationProgress(progress = currentProgress, speed = dynamicSpeedKmh)
                 updateNotification("进度: ${(point.progressPercent * 100).toInt()}% | ${(point.distanceTraveled / 1000.0).format(2)} km")
 
                 if (point.isCompleted) {
+                    userStopped = true
                     saveSimulationState(active = false)
                     sensorEngine.updateTick(0f, 0f)
                     stateRepo.onSimulationCompleted()
@@ -302,6 +324,7 @@ class MockLocationService : Service() {
     }
 
     private fun pauseSimulation() {
+        currentSessionId++
         simulationJob?.cancel()
         sensorEngine.updateTick(0f, 0f)
         stateRepo.onPaused(currentProgress)
@@ -310,10 +333,14 @@ class MockLocationService : Service() {
 
     private fun resumeSimulation() {
         val route = currentRoute ?: return
-        startSimulation(route, currentSpeedKmh, currentProgress)
+        val sessionId = ++currentSessionId
+        stateRepo.onSimulationStarted(route, currentSpeedKmh)
+        launchSimulationLoop(sessionId, route, currentSpeedKmh, currentProgress)
     }
 
     private fun stopSimulation() {
+        userStopped = true
+        currentSessionId++
         simulationJob?.cancel()
         sensorEngine.updateTick(0f, 0f)
         saveSimulationState(active = false)
@@ -333,19 +360,21 @@ class MockLocationService : Service() {
         currentSpeedKmh = newSpeedKmh
         stateRepo.setSpeed(newSpeedKmh)
         val route = currentRoute ?: return
-        // Restart simulator at current progress with new speed
-        simulationJob?.cancel()
-        startSimulation(route, newSpeedKmh, currentProgress)
+        val sessionId = ++currentSessionId
+        launchSimulationLoop(sessionId, route, newSpeedKmh, currentProgress)
     }
 
     private fun seekTo(progress: Float) {
         val route = currentRoute ?: return
         currentProgress = progress.coerceIn(0f, 1f)
-        simulationJob?.cancel()
-        startSimulation(route, currentSpeedKmh, currentProgress)
+        val sessionId = ++currentSessionId
+        launchSimulationLoop(sessionId, route, currentSpeedKmh, currentProgress)
     }
 
     private fun startPointMock(lat: Double, lon: Double) {
+        userStopped = false
+        val sessionId = ++currentSessionId
+
         // Mutual exclusion: cancel route simulation
         simulationJob?.cancel()
         saveSimulationState(active = false)
@@ -353,7 +382,7 @@ class MockLocationService : Service() {
         com.mockrun.app.hook.HookStateBridge.setRouteSimulationMode(false)
         pointMockJob?.cancel()
 
-        if (!mockEngine.register()) {
+        if (!mockEngine.isRegistered() && !mockEngine.register()) {
             stateRepo.onError("权限不足：请在手机【开发者选项】中将 Fake GPS 设为「模拟位置信息应用」")
             stopSelf()
             return
@@ -382,7 +411,7 @@ class MockLocationService : Service() {
 
         pointMockJob = serviceScope.launch {
             var tick = 0
-            while (isActive) {
+            while (isActive && sessionId == currentSessionId) {
                 runCatching {
                     // Natural micro-jitter (±0.2m) to mimic authentic GPS drift and bypass anti-cheat
                     val jitterLat = (kotlin.random.Random.nextDouble(-1.0, 1.0) * 0.000002)
@@ -421,6 +450,8 @@ class MockLocationService : Service() {
     }
 
     private fun stopPointMock() {
+        userStopped = true
+        currentSessionId++
         pointMockJob?.cancel()
         savePointMockState(active = false)
         stateRepo.setPointMock(false)

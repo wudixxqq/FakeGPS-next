@@ -22,11 +22,12 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import com.mockrun.app.core.data.repository.MultiTargetRepository
 import com.mockrun.app.domain.model.MultiTargetRule
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 @HiltViewModel
@@ -118,47 +119,53 @@ class SimulationViewModel @Inject constructor(
         stateRepo.updateRealPhysicalLocation(latitude, longitude)
     }
 
-    fun startPointMock(context: Context, latitude: Double, longitude: Double): Boolean {
-        // Root 模式：注入前自动授予模拟权限（含全局开发者选项开关），避免弹「请前往开发者选项勾选」
-        val issue = runBlocking(Dispatchers.IO) { resolveInjectionPermission(context) }
-        if (issue != com.mockrun.app.util.PermissionIssueType.NONE) {
-            when (issue) {
-                com.mockrun.app.util.PermissionIssueType.LOCATION_PERMISSION_MISSING ->
-                    stateRepo.onError("缺少精确定位权限，请先授予权限")
-                com.mockrun.app.util.PermissionIssueType.MOCK_LOCATION_APP_NOT_SET ->
-                    stateRepo.onError("请在手机【开发者选项】中将 Fake GPS 设为「模拟位置信息应用」")
-                else -> {}
-            }
-            return false
-        }
-        // Mutual Exclusion: Stop Route Simulation if running
-        if (stateRepo.state.value.status is com.mockrun.app.domain.model.SimulationStatus.Running) {
-            stopSimulation(context)
-        }
+    private var startMockJob: Job? = null
+    private var startSimJob: Job? = null
 
-        stateRepo.setPointMock(true, com.mockrun.app.domain.model.WayPoint(latitude, longitude))
-        stateRepo.updateJoystickLocation(latitude, longitude)
-        com.mockrun.app.hook.HookStateBridge.update(context, true, latitude, longitude)
+    fun startPointMock(context: Context, latitude: Double, longitude: Double) {
+        startMockJob?.cancel()
+        startMockJob = viewModelScope.launch {
+            // Root 模式：注入前自动授予模拟权限（含全局开发者选项开关），避免弹「请前往开发者选项勾选」
+            val issue = withContext(Dispatchers.IO) { resolveInjectionPermission(context) }
+            if (issue != com.mockrun.app.util.PermissionIssueType.NONE) {
+                when (issue) {
+                    com.mockrun.app.util.PermissionIssueType.LOCATION_PERMISSION_MISSING ->
+                        stateRepo.onError("缺少精确定位权限，请先授予权限")
+                    com.mockrun.app.util.PermissionIssueType.MOCK_LOCATION_APP_NOT_SET ->
+                        stateRepo.onError("请在手机【开发者选项】中将 Fake GPS 设为「模拟位置信息应用」")
+                    else -> {}
+                }
+                return@launch
+            }
+            // Mutual Exclusion: Stop Route Simulation if running
+            if (stateRepo.state.value.status is com.mockrun.app.domain.model.SimulationStatus.Running) {
+                stopSimulation(context)
+            }
 
-        if (stateRepo.isJoystickActive.value) {
-            val intent = Intent(context, com.mockrun.app.core.location.FloatingJoystickService::class.java).apply {
-                action = com.mockrun.app.core.location.FloatingJoystickService.ACTION_SET_LOCATION
-                putExtra(com.mockrun.app.core.location.FloatingJoystickService.EXTRA_LATITUDE, latitude)
-                putExtra(com.mockrun.app.core.location.FloatingJoystickService.EXTRA_LONGITUDE, longitude)
+            stateRepo.setPointMock(true, com.mockrun.app.domain.model.WayPoint(latitude, longitude))
+            stateRepo.updateJoystickLocation(latitude, longitude)
+            com.mockrun.app.hook.HookStateBridge.update(context, true, latitude, longitude)
+
+            if (stateRepo.isJoystickActive.value) {
+                val intent = Intent(context, com.mockrun.app.core.location.FloatingJoystickService::class.java).apply {
+                    action = com.mockrun.app.core.location.FloatingJoystickService.ACTION_SET_LOCATION
+                    putExtra(com.mockrun.app.core.location.FloatingJoystickService.EXTRA_LATITUDE, latitude)
+                    putExtra(com.mockrun.app.core.location.FloatingJoystickService.EXTRA_LONGITUDE, longitude)
+                }
+                context.startService(intent)
+            } else {
+                val intent = Intent(context, MockLocationService::class.java).apply {
+                    action = MockLocationService.ACTION_START_POINT_MOCK
+                    putExtra(MockLocationService.EXTRA_LATITUDE, latitude)
+                    putExtra(MockLocationService.EXTRA_LONGITUDE, longitude)
+                }
+                ContextCompat.startForegroundService(context, intent)
             }
-            context.startService(intent)
-        } else {
-            val intent = Intent(context, MockLocationService::class.java).apply {
-                action = MockLocationService.ACTION_START_POINT_MOCK
-                putExtra(MockLocationService.EXTRA_LATITUDE, latitude)
-                putExtra(MockLocationService.EXTRA_LONGITUDE, longitude)
-            }
-            ContextCompat.startForegroundService(context, intent)
         }
-        return true
     }
 
     fun stopPointMock(context: Context) {
+        startMockJob?.cancel()
         stateRepo.setPointMock(false)
         com.mockrun.app.hook.HookStateBridge.update(context, false)
         com.mockrun.app.core.location.MockLocationEngine.forceCleanAllTestProviders(context)
@@ -182,38 +189,40 @@ class SimulationViewModel @Inject constructor(
         context.startService(intent)
     }
 
-    fun startSimulation(context: Context, route: Route, speedKmh: Float): Boolean {
-        // Root 模式：注入前自动授予模拟权限（含全局开发者选项开关），避免弹「请前往开发者选项勾选」
-        val issue = runBlocking(Dispatchers.IO) { resolveInjectionPermission(context) }
-        if (issue != com.mockrun.app.util.PermissionIssueType.NONE) {
-            when (issue) {
-                com.mockrun.app.util.PermissionIssueType.LOCATION_PERMISSION_MISSING ->
-                    stateRepo.onError("缺少精确定位权限，请先授予权限")
-                com.mockrun.app.util.PermissionIssueType.MOCK_LOCATION_APP_NOT_SET ->
-                    stateRepo.onError("请在手机【开发者选项】中将 Fake GPS 设为「模拟位置信息应用」")
-                else -> {}
+    fun startSimulation(context: Context, route: Route, speedKmh: Float) {
+        startSimJob?.cancel()
+        startSimJob = viewModelScope.launch {
+            // Root 模式：注入前自动授予模拟权限（含全局开发者选项开关），避免弹「请前往开发者选项勾选」
+            val issue = withContext(Dispatchers.IO) { resolveInjectionPermission(context) }
+            if (issue != com.mockrun.app.util.PermissionIssueType.NONE) {
+                when (issue) {
+                    com.mockrun.app.util.PermissionIssueType.LOCATION_PERMISSION_MISSING ->
+                        stateRepo.onError("缺少精确定位权限，请先授予权限")
+                    com.mockrun.app.util.PermissionIssueType.MOCK_LOCATION_APP_NOT_SET ->
+                        stateRepo.onError("请在手机【开发者选项】中将 Fake GPS 设为「模拟位置信息应用」")
+                    else -> {}
+                }
+                return@launch
             }
-            return false
-        }
 
-        // Mutual Exclusion: Stop Point Mock & Joystick if active
-        if (stateRepo.isPointMockActive.value) {
-            stopPointMock(context)
-        }
-        if (stateRepo.isJoystickActive.value) {
-            context.stopService(Intent(context, com.mockrun.app.core.location.FloatingJoystickService::class.java))
-        }
-
-        stateRepo.prepareRoute(route)
-        val intent = Intent(context, MockLocationService::class.java).apply {
-            action = MockLocationService.ACTION_START
-            if (route.waypoints.size <= 50) {
-                putExtra(MockLocationService.EXTRA_ROUTE, route)
+            // Mutual Exclusion: Stop Point Mock & Joystick if active
+            if (stateRepo.isPointMockActive.value) {
+                stopPointMock(context)
             }
-            putExtra(MockLocationService.EXTRA_SPEED, speedKmh)
+            if (stateRepo.isJoystickActive.value) {
+                context.stopService(Intent(context, com.mockrun.app.core.location.FloatingJoystickService::class.java))
+            }
+
+            stateRepo.prepareRoute(route)
+            val intent = Intent(context, MockLocationService::class.java).apply {
+                action = MockLocationService.ACTION_START
+                if (route.waypoints.size <= 50) {
+                    putExtra(MockLocationService.EXTRA_ROUTE, route)
+                }
+                putExtra(MockLocationService.EXTRA_SPEED, speedKmh)
+            }
+            ContextCompat.startForegroundService(context, intent)
         }
-        ContextCompat.startForegroundService(context, intent)
-        return true
     }
 
     /**

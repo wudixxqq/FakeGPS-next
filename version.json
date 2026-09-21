@@ -1,8 +1,8 @@
 {
-  "versionName": "v1.5.0",
-  "versionCode": 27,
-  "releaseDate": "2026-09-19",
-  "releaseNotes": "Root 模式权限链路重构与稳定性修复：\n\n1. 新增 PermissionCoordinator：把所有注入入口（地图选点页、虚拟定位页、路线页、摇杆服务）的注入前权限判定与自动授权统一收口，避免各页面各自判定产生行为分歧。\n\n2. 修复 Root 模式误弹「需设置模拟位置应用」：mock_location 应用 op 由 su 在外部进程写入，App 进程内 AppOpsManager 读取带缓存，授权后立刻校验会读到旧值而误判。现改为以 Root 授权命令的退出码为准直接放行，真正的兜底由注入时 MockLocationService.register（addTestProvider）把关。\n\n3. 授权命令健壮性：appops 与 settings put 分开执行、互不短路，并依次尝试 appops set / cmd appops set / appops set --uid 三种写法；settings put global development_settings_enabled 仅作尽力而为。\n\n4. 工程结构分层整理：core（data / designsystem / location）、feature（map / mock / route / settings）、ui（components / navigation / viewmodel）、hook、util。\n\n5. 免 Root 模式行为不变：完全不调用 su，仍由用户在【开发者选项】手动勾选模拟位置应用。防卡死逻辑不变：停止 / 销毁 / 任务划掉仍无条件 forceCleanAllTestProviders + flushRealLocation。\n\n本版与 v1.4.7 共用同一签名密钥，可直接覆盖安装。",
+  "versionName": "v1.6.0",
+  "versionCode": 29,
+  "releaseDate": "2026-09-21",
+  "releaseNotes": "P0 架构重构与性能深度优化：\n\n1. 消除 UI 阻塞：彻底移除 SimulationViewModel 中的 runBlocking，转为全异步协程与上下文切换，结合 Job 追踪避免快速点击导致的并发重入与 ANR。\n\n2. 消除高频序列化：MockLocationService 在 1 秒 tick 循环中仅写入轻量进度与速度（saveSimulationProgress），全量 Route 仅在启动时序列化一次，彻底消灭 GC 与 I/O 抖动。\n\n3. 会话隔离机制：引入 currentSessionId 管理模拟与单点定位会话，快速启停与变速 Seek 时丢弃陈旧数据包，杜绝竞态与坐标跳变。\n\n4. Provider 生命周期解耦：变速与 Seek 拖动不再重新注册 addTestProvider，仅平滑重启模拟流，消除系统位置提供商反复注册引发的广播冲击与漂移。\n\n5. 区分用户停止与系统回收：引入 userStopped 状态标记，当服务被系统 LMK 回收时完整保留恢复点，支持 START_STICKY 完美无感续跑。\n\n本版与历代发布版本共用同一签名密钥，可直接覆盖安装。",
   "releaseUrl": "https://github.com/Elysia-SHY/FakeGPS-next/releases/latest",
-  "downloadUrl": "https://github.com/Elysia-SHY/FakeGPS-next/releases/download/v1.5.0/FakeGPS-next-v1.5.0-release.apk"
+  "downloadUrl": "https://github.com/Elysia-SHY/FakeGPS-next/releases/download/v1.6.0/FakeGPS-next-v1.6.0-release.apk"
 }
